@@ -41,3 +41,6 @@ uvicorn api.main:app --reload
 | Name | Role | GitHub |
 |------|------|--------|
 |      |      |        |
+
+Aisyah yuhuuuu
+
