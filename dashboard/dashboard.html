@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>GRIDWATCH - Lagezentrum</title>
+    <title>GRIDWATCH - Control Center</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin: 0; background: #0b0d11; color: #00ff41; font-family: 'Courier New', monospace; overflow: hidden; }
         #map { height: 60vh; width: 100%; border-bottom: 2px solid #00ff41; background: #0b0d11; }
-        #info-panel { padding: 20px; display: flex; justify-content: space-around; font-size: 1.5rem; background: #0b0d11; }
         #chart-container { height: 25vh; width: 100%; background: #000; padding: 10px; box-sizing: border-box; }
+        #info-panel { padding: 20px; display: flex; justify-content: space-around; font-size: 1.5rem; background: #0b0d11; }
         .glitch { text-shadow: 0 0 10px #00ff41; }
         .danger-text { color: #ff3131; text-shadow: 0 0 10px #ff3131; font-weight: bold; }
         #alert-box { padding: 10px; background: rgba(255,0,0,0.1); border: 1px solid #ff3131; margin: 10px; display: none; position: absolute; top: 10px; right: 10px; z-index: 1000; }
@@ -28,81 +28,64 @@
     </div>
 
     <div id="info-panel">
-        <div>FREQUENCY: <span id="freq" class="glitch">--.---</span> Hz</div>
+        <div>FREQ: <span id="freq" class="glitch">--.---</span> Hz</div>
         <div>STATUS: <span id="status" class="glitch">INITIALIZING</span></div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
     <script>
-        // 1. Initialize Chart.js
+        // 1. Initialize Trend Chart
         const ctx = document.getElementById('freqChart').getContext('2d');
         const freqChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: [], 
                 datasets: [{
-                    label: 'Grid Frequency (Hz)',
+                    label: 'Hz',
                     data: [], 
                     borderColor: '#00ff41',
-                    backgroundColor: 'rgba(0, 255, 65, 0.1)',
                     borderWidth: 2,
                     tension: 0.3,
                     pointRadius: 2,
-                    fill: true
+                    fill: true,
+                    backgroundColor: 'rgba(0, 255, 65, 0.05)'
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: { 
-                    y: { 
-                        min: 49.90, 
-                        max: 50.10, 
-                        grid: { color: '#222' },
-                        ticks: { color: '#00ff41' }
-                    }, 
+                    y: { min: 49.92, max: 50.08, grid: { color: '#222' }, ticks: { color: '#00ff41' } }, 
                     x: { display: false } 
                 },
                 plugins: { legend: { display: false } }
             }
         });
 
-        // 2. Initialize Leaflet Map
-        const map = L.map('map').setView([51.1657, 10.4515], 6);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap'
-        }).addTo(map);
+        // 2. Initialize Map
+        const map = L.map('map', { zoomControl: false }).setView([51.1657, 10.4515], 6);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+        const pulse = L.circle([51.1657, 10.4515], { color: '#00ff41', radius: 150000 }).addTo(map);
 
-        const pulse = L.circle([51.1657, 10.4515], {
-            color: '#00ff41',
-            fillColor: '#00ff41',
-            fillOpacity: 0.3,
-            radius: 150000
-        }).addTo(map);
-
-        // 3. The Core Update Function
+        // 3. Update Logic
         async function updateGrid() {
             try {
-                // Fetch new data from your Python API
                 const response = await fetch('http://127.0.0.1:8000/status');
                 const data = await response.json();
 
-                // If API is on cooldown, skip updating the chart
                 if (data.error) {
                     document.getElementById('status').innerText = "API COOLDOWN";
                     return;
                 }
 
-                // Update Dashboard Text
+                // Update UI Elements
                 document.getElementById('freq').innerText = data.value.toFixed(4);
-                document.getElementById('status').innerText = data.status;
+                document.getElementById('status').innerText = data.status || "STABLE";
 
-                // Handle Alerts and Map Colors
                 const alertBox = document.getElementById('alert-box');
                 if (data.status !== "STABLE") {
                     alertBox.style.display = 'block';
-                    document.getElementById('alert-msg').innerText = data.message || "Unstable frequency!";
+                    document.getElementById('alert-msg').innerText = data.message;
                     document.getElementById('status').className = 'danger-text';
                     pulse.setStyle({color: '#ff3131', fillColor: '#ff3131'});
                 } else {
@@ -111,26 +94,22 @@
                     pulse.setStyle({color: '#00ff41', fillColor: '#00ff41'});
                 }
 
-                // Update Chart Data
+                // Update Chart
                 const now = new Date().toLocaleTimeString();
                 freqChart.data.labels.push(now);
                 freqChart.data.datasets[0].data.push(data.value);
-
-                // Keep only last 25 points to make it "move"
-                if (freqChart.data.labels.length > 25) {
+                if (freqChart.data.labels.length > 30) {
                     freqChart.data.labels.shift();
                     freqChart.data.datasets[0].data.shift();
                 }
-
-                freqChart.update(); // Redraw the chart line
+                freqChart.update();
 
             } catch (err) {
-                console.error("Backend unreachable");
                 document.getElementById('status').innerText = "OFFLINE";
             }
         }
 
-        // Run immediately and then every 5 seconds
+        // Run heartbeat every 15 seconds
         updateGrid();
         setInterval(updateGrid, 15000);
     </script>

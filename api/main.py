@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import requests
-import datetime
+import time
+import json  # Required for saving files
 
-app = FastAPI(title="Hackathon Practice API")
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -12,35 +13,49 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-API_TOKEN = "5o7M8JI2dsqF83M91PTwmxIJIOxX0q7+VXduJQi9iqZTidHs/KxbXsMETMUoStDlnhSwX0zqHmqilkGXx6UgGrZtKtfyQneSApvpd+cjXHw70m4mnPT8Ym2feaZMncFU"
+API_TOKEN = "Zd2lvI+1fMlnrA0Re3IQ8VIz2SkYAqmqedTN7gGD8ReOTYGMEa5qk3qOX4Wrijy6d2M2l4iBI1uOcnpXKu/qnm7pPap5BH6uH946a6sEtQPqlludQc0gv4U/5V5tEotC"
 QUERY_URL = "https://api.gridradar.net/query"
+PAYLOAD = {"metric": "frequency-ucte-median-1s", "format": "json", "ts": "rfc3339", "aggr": "1s"}
+HEADERS = {"Content-type": "application/json", "Authorization": f"Bearer {API_TOKEN}"}
 
-# --- CRITICAL: Move this OUTSIDE the function so it stays in memory ---
-recent_readings = []
+# Cache variables to prevent 429 errors
+last_valid_data = None
+last_fetch_time = 0
 
 @app.get("/status")
 def get_grid_status():
+    global last_valid_data, last_fetch_time
+    current_time = time.time()
+
+    # Use cache if we are within the 15-second limit
+    if last_valid_data and (current_time - last_fetch_time) < 15:
+        return {**last_valid_data, "source": "cache"}
+
     try:
-        payload = {"metric": "frequency-ucte-median-1s", "format": "json"}
-        headers = {"Content-type": "application/json", "Authorization": f"Bearer {API_TOKEN}"}
+        response = requests.post(QUERY_URL, json=PAYLOAD, headers=HEADERS)
         
-        response = requests.post(QUERY_URL, json=payload, headers=headers)
-        if response.status_code != 200:
-            return {"error": "API Error", "detail": response.text}
+        if response.status_code == 200:
+            data = response.json()
+            latest = data[0]['datapoints'][-1]
+            
+            # Prepare the data package
+            last_valid_data = {
+                "value": latest[0],
+                "timestamp": latest[1],
+                "status": "STABLE" if 49.95 < latest[0] < 50.05 else "WARNING",
+                "region": "Central Europe"
+            }
+            last_fetch_time = current_time
 
-        data = response.json()
-        latest_reading = data[0]['datapoints'][-1]
-        freq_value = latest_reading[0]
-        timestamp = latest_reading[1]
+            # --- THE LOGGING BLOCK ---
+            # 'a' means APPEND (add to the end of the file)
+            with open("grid_history_log.json", "a") as f:
+                f.write(json.dumps(last_valid_data) + "\n")
+            # -------------------------
 
-        # Add to memory
-        recent_readings.append(freq_value)
-        if len(recent_readings) > 20: recent_readings.pop(0)
-
+            return {**last_valid_data, "source": "live"}
         
-        return {
-            "value": freq_value,
-            "timestamp": timestamp
-        }
+        return last_valid_data if last_valid_data else {"error": "API Cooldown"}
+
     except Exception as e:
         return {"error": "Connection Failed", "detail": str(e)}
