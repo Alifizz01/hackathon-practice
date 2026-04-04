@@ -1,46 +1,49 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 import requests
-import datetime
+import dotenv
 
-app = FastAPI(title="Hackathon Practice API")
+dotenv.load_dotenv()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+BASE_URL = "https://api.gridradar.net"
 
-API_TOKEN = "5o7M8JI2dsqF83M91PTwmxIJIOxX0q7+VXduJQi9iqZTidHs/KxbXsMETMUoStDlnhSwX0zqHmqilkGXx6UgGrZtKtfyQneSApvpd+cjXHw70m4mnPT8Ym2feaZMncFU"
-QUERY_URL = "https://api.gridradar.net/query"
 
-# --- CRITICAL: Move this OUTSIDE the function so it stays in memory ---
-recent_readings = []
+def get_headers() -> dict:
+    token = dotenv.get_key(dotenv.find_dotenv(), "GRIDRADAR_API_TOKEN")
+    return {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
 
-@app.get("/status")
-def get_grid_status():
-    try:
-        payload = {"metric": "frequency-ucte-median-1s", "format": "json"}
-        headers = {"Content-type": "application/json", "Authorization": f"Bearer {API_TOKEN}"}
-        
-        response = requests.post(QUERY_URL, json=payload, headers=headers)
-        if response.status_code != 200:
-            return {"error": "API Error", "detail": response.text}
 
-        data = response.json()
-        latest_reading = data[0]['datapoints'][-1]
-        freq_value = latest_reading[0]
-        timestamp = latest_reading[1]
+def query(
+    metric: str = "frequency-ucte-median-1s",
+    aggr: str = "1s",
+    fmt: str = "json",
+    ts: str = "rfc3339",
+    from_: str | None = None,
+    to: str | None = None,
+) -> dict:
+    payload = {"metric": metric, "format": fmt, "ts": ts, "aggr": aggr}
 
-        # Add to memory
-        recent_readings.append(freq_value)
-        if len(recent_readings) > 20: recent_readings.pop(0)
+    if from_:
+        payload["from"] = from_
+    if to:
+        payload["to"] = to
 
-        
-        return {
-            "value": freq_value,
-            "timestamp": timestamp
-        }
-    except Exception as e:
-        return {"error": "Connection Failed", "detail": str(e)}
+    response = requests.post(
+        f"{BASE_URL}/query",
+        headers=get_headers(),
+        json=payload,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def get_formats() -> dict:
+    response = requests.post(f"{BASE_URL}/formats", headers=get_headers())
+    response.raise_for_status()
+    return response.json()
+
+
+if __name__ == "__main__":
+    data = query(metric="frequency-ucte-median-1s", aggr="1s")
+    print(data)
